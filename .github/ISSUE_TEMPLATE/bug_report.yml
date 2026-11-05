@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible arizdot problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Assistant
+      options: [Codex desktop, Claude Code, Claude Desktop Chat, Multiple assistants, Installer]
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Windows, Python, arizdot and assistant versions. Do not include personal paths.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and expected behavior
+      description: Describe what you did, what happened, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted diagnostics or synthetic screenshot
+      description: Remove conversations, credentials, personal paths and scientific project details.

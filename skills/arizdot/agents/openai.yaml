@@ -1,0 +1,6 @@
+interface:
+  display_name: "arizdot"
+  short_description: "Open arizdot or check live work progress"
+  default_prompt: "Use $arizdot to open my floating work indicator."
+policy:
+  allow_implicit_invocation: false

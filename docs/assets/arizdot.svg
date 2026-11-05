@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="arizdot">
+  <rect width="128" height="128" rx="40" fill="#08090b"/>
+  <circle cx="64" cy="64" r="31" fill="none" stroke="#2b3341" stroke-width="7"/>
+  <path d="M64 33a31 31 0 0 1 26.8 46.5" fill="none" stroke="#68f0b0" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="12" fill="#68f0b0"/>
+</svg>

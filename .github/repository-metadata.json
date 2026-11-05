@@ -1,0 +1,15 @@
+{
+  "owner": "arizmurad",
+  "name": "arizdot",
+  "visibility": "public",
+  "description": "A floating Windows indicator for Codex and Claude, with shared background-job monitoring, real progress sources, inline milestones, and quick chat return.",
+  "homepage": "https://github.com/arizmurad/ariztools",
+  "topics": ["arizdot", "ariztools", "codex", "claude", "claude-code", "mcp", "windows", "desktop-widget", "progress-tracker", "background-jobs", "process-monitor", "python", "developer-tools"],
+  "release_tag": "v0.1.0-preview.1",
+  "release_title": "arizdot v0.1.0-preview.1 — Codex and Claude for Windows",
+  "prerelease": true,
+  "draft": true,
+  "review_owner": "arizmurad",
+  "license": "MIT",
+  "application_status": "Prepared locally; not applied to GitHub"
+}

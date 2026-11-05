@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.spec
+config/
+live-preview.png
+.arizdot-link.json
+*.log
+.env
+.env.*
+!.env.example

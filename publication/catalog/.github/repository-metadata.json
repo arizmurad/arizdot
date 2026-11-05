@@ -1,0 +1,11 @@
+{
+  "owner": "arizmurad",
+  "name": "ariztools",
+  "visibility": "public",
+  "description": "Small, focused tools by ariztotell. Explore arizdot and future tools for everyday work.",
+  "homepage": "https://github.com/arizmurad/arizdot",
+  "topics": ["ariztools", "arizdot", "developer-tools", "productivity", "open-source", "windows", "codex", "claude"],
+  "review_owner": "arizmurad",
+  "license": "MIT",
+  "application_status": "Prepared locally; not applied to GitHub"
+}

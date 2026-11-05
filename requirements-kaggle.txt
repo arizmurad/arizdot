@@ -1,0 +1,4 @@
+# Optional remote notebook monitoring; uses the official read APIs only.
+kaggle==2.2.5
+# Kaggle imports six directly; newer python-dateutil no longer pulls it in.
+six==1.17.0
