@@ -50,8 +50,9 @@ jobs:
       - name: Build and validate all three packages
         shell: python
         run: |
-          import hashlib, json, os, subprocess, zipfile
+          import hashlib, json, os, subprocess, sys, zipfile
           from pathlib import Path
+          sys.path.insert(0, os.getcwd())
           from package_source import source_files, build_release
           stamp = int(subprocess.check_output(['git', 'show', '-s', '--format=%ct', 'HEAD'], text=True).strip())
           for path in source_files():
