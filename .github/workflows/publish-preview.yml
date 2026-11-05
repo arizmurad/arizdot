@@ -2,9 +2,6 @@ name: Publish Windows preview
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/publish-preview.yml']
 
 # This workflow publishes only the explicitly reviewed first preview commit.
 # Published releases are immutable here; a rerun can only repair its draft.
