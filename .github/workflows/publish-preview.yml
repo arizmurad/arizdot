@@ -1,0 +1,123 @@
+name: Publish Windows preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-preview.yml']
+
+# This workflow publishes only the explicitly reviewed first preview commit.
+# Published releases are immutable here; a rerun can only repair its draft.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-v0.1.0-preview.1
+  cancel-in-progress: false
+
+env:
+  SOURCE_COMMIT: 83841537e1811c753cc086d48cb98002f84862bc
+  RELEASE_TAG: v0.1.0-preview.1
+
+jobs:
+  publish:
+    if: github.repository == 'arizmurad/arizdot' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Verify source and installers
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_COMMIT) { throw 'Unexpected source revision' }
+          python -m pip install -r requirements-claude.txt
+          if ($LASTEXITCODE) { throw 'Dependency installation failed' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE) { throw 'Tests failed' }
+          python install_windows.py --check
+          if ($LASTEXITCODE) { throw 'Installer check failed' }
+      - name: Build and validate all three packages
+        shell: python
+        run: |
+          import hashlib, json, os, subprocess, zipfile
+          from pathlib import Path
+          from package_source import source_files, build_release
+          stamp = int(subprocess.check_output(['git', 'show', '-s', '--format=%ct', 'HEAD'], text=True).strip())
+          for path in source_files():
+              os.utime(path, (stamp, stamp))
+          releases = build_release()
+          common = None
+          checksums = []
+          for target, result in releases.items():
+              path = Path(result['archive'])
+              with zipfile.ZipFile(path) as archive:
+                  assert archive.testzip() is None
+                  manifest = json.loads(archive.read('ariztools/SOURCE-MANIFEST.json'))
+                  assert json.loads(archive.read('ariztools/PACKAGE.json'))['target'] == target
+                  assert len(manifest) == 106, 'Unexpected reviewed source file count'
+                  for name, digest in manifest.items():
+                      assert hashlib.sha256(archive.read('ariztools/' + name)).hexdigest() == digest, name
+                  shared = {name: digest for name, digest in manifest.items() if name != 'PACKAGE.json'}
+                  assert common is None or shared == common, 'Provider source differs'
+                  common = shared
+              checksums.append(result['sha256'] + '  ' + path.name + '\n')
+          Path('dist/SHA256SUMS.txt').write_text(''.join(checksums), encoding='utf-8', newline='\n')
+      - name: Retain verified packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: arizdot-v0.1.0-preview.1-windows
+          path: |
+            dist/arizdot-0.1.0-preview.1-*-windows.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload, download-verify, and publish the preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'This release is already public; refusing to replace it' }
+            gh release edit $env:RELEASE_TAG --draft=true --prerelease --target $env:SOURCE_COMMIT --title 'arizdot v0.1.0-preview.1 — Codex and Claude for Windows' --notes-file docs/RELEASE-NOTES.md
+          } else {
+            gh release create $env:RELEASE_TAG --draft --prerelease --target $env:SOURCE_COMMIT --title 'arizdot v0.1.0-preview.1 — Codex and Claude for Windows' --notes-file docs/RELEASE-NOTES.md
+          }
+          if ($LASTEXITCODE) { throw 'Could not prepare the release draft' }
+          $packages = @(Get-ChildItem -LiteralPath dist -Filter 'arizdot-0.1.0-preview.1-*-windows.zip')
+          if ($packages.Count -ne 3) { throw 'Expected exactly three profiles' }
+          $files = @($packages) + @(Get-Item -LiteralPath dist/SHA256SUMS.txt)
+          foreach ($file in $files) {
+            $uploaded = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              gh release upload $env:RELEASE_TAG $file.FullName --clobber
+              if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
+              Start-Sleep -Seconds 3
+            }
+            if (-not $uploaded) { throw "Upload failed: $($file.Name)" }
+          }
+          $download = Join-Path $env:RUNNER_TEMP 'arizdot-release-verification'
+          New-Item -ItemType Directory -Path $download | Out-Null
+          gh release download $env:RELEASE_TAG --dir $download --pattern '*.zip' --pattern SHA256SUMS.txt
+          if ($LASTEXITCODE) { throw 'Release download verification failed' }
+          foreach ($file in $files) {
+            $expected = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            $actual = (Get-FileHash -LiteralPath (Join-Path $download $file.Name) -Algorithm SHA256).Hash
+            if ($expected -ne $actual) { throw "Download checksum mismatch: $($file.Name)" }
+          }
+          gh release edit $env:RELEASE_TAG --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE) { throw 'Publishing failed; verified files remain in the draft' }
+          gh release view $env:RELEASE_TAG --json url,isDraft,isPrerelease,assets
+          if ($LASTEXITCODE) { throw 'Could not verify the published release' }
