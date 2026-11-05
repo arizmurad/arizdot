@@ -50,7 +50,7 @@ jobs:
       - name: Build and validate all three packages
         shell: python
         run: |
-          import hashlib, json, os, subprocess, sys, zipfile
+          import hashlib, json, os, subprocess, sys, textwrap, zipfile
           from pathlib import Path
           sys.path.insert(0, os.getcwd())
           from package_source import source_files, build_release
@@ -74,6 +74,36 @@ jobs:
                   common = shared
               checksums.append(result['sha256'] + '  ' + path.name + '\n')
           Path('dist/SHA256SUMS.txt').write_text(''.join(checksums), encoding='utf-8', newline='\n')
+          # Reuse a successfully uploaded draft archive only after verifying
+          # every member against this reviewed checkout (allowing Git EOLs).
+          verifier = Path(os.environ['RUNNER_TEMP']) / 'verify_arizdot_archive.py'
+          verifier.write_text(textwrap.dedent('''\
+          import hashlib, json, os, sys, zipfile
+          from pathlib import Path
+          sys.path.insert(0, os.getcwd())
+          from package_source import source_files
+          archive_path, target = sys.argv[1:]
+          expected = {p.relative_to(Path.cwd()).as_posix(): p for p in source_files()}
+          with zipfile.ZipFile(archive_path) as archive:
+              assert archive.testzip() is None
+              manifest = json.loads(archive.read('ariztools/SOURCE-MANIFEST.json'))
+              assert set(manifest) == set(expected) | {'PACKAGE.json'}
+              assert len(archive.namelist()) == len(manifest) + 1
+              assert set(archive.namelist()) == {'ariztools/' + n for n in manifest} | {'ariztools/SOURCE-MANIFEST.json'}
+              profile = json.loads(archive.read('ariztools/PACKAGE.json'))
+              assert profile == {'target': target, 'version': Path('VERSION').read_text().strip()}
+              for name, digest in manifest.items():
+                  content = archive.read('ariztools/' + name)
+                  assert hashlib.sha256(content).hexdigest() == digest, name
+                  if name == 'PACKAGE.json':
+                      continue
+                  original = expected[name].read_bytes()
+                  if expected[name].suffix not in ('.png', '.webp', '.gif'):
+                      content = content.replace(b'\\r\\n', b'\\n')
+                      original = original.replace(b'\\r\\n', b'\\n')
+                  assert content == original, 'Unreviewed archive source: ' + name
+          print('Verified reviewed source and profile:', target)
+          '''), encoding='utf-8')
       - name: Retain verified packages
         uses: actions/upload-artifact@v4
         with:
@@ -89,9 +119,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          $existing = gh release view $env:RELEASE_TAG --json isDraft,assets 2>$null
+          $existingAssets = @()
           if ($LASTEXITCODE -eq 0) {
             if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'This release is already public; refusing to replace it' }
+            $existingAssets = @(($existing | ConvertFrom-Json).assets)
             gh release edit $env:RELEASE_TAG --draft=true --prerelease --target $env:SOURCE_COMMIT --title 'arizdot v0.1.0-preview.1 — Codex and Claude for Windows' --notes-file docs/RELEASE-NOTES.md
           } else {
             gh release create $env:RELEASE_TAG --draft --prerelease --target $env:SOURCE_COMMIT --title 'arizdot v0.1.0-preview.1 — Codex and Claude for Windows' --notes-file docs/RELEASE-NOTES.md
@@ -99,16 +131,39 @@ jobs:
           if ($LASTEXITCODE) { throw 'Could not prepare the release draft' }
           $packages = @(Get-ChildItem -LiteralPath dist -Filter 'arizdot-0.1.0-preview.1-*-windows.zip')
           if ($packages.Count -ne 3) { throw 'Expected exactly three profiles' }
-          $files = @($packages) + @(Get-Item -LiteralPath dist/SHA256SUMS.txt)
-          foreach ($file in $files) {
+          $allowedNames = @($packages.Name) + @('SHA256SUMS.txt')
+          foreach ($asset in $existingAssets) {
+            if ($asset.name -notin $allowedNames) { throw "Unexpected draft asset: $($asset.name)" }
+          }
+          foreach ($file in $packages) {
+            if ($file.Name -in $existingAssets.name) {
+              $existingDir = Join-Path $env:RUNNER_TEMP $file.BaseName
+              New-Item -ItemType Directory -Path $existingDir | Out-Null
+              gh release download $env:RELEASE_TAG --dir $existingDir --pattern $file.Name
+              if ($LASTEXITCODE) { throw "Could not read existing asset: $($file.Name)" }
+              $existingFile = Join-Path $existingDir $file.Name
+              $profile = $file.Name -replace '^arizdot-0.1.0-preview.1-', '' -replace '-windows.zip$', ''
+              python (Join-Path $env:RUNNER_TEMP 'verify_arizdot_archive.py') $existingFile $profile
+              if ($LASTEXITCODE) { throw "Existing asset does not match reviewed source: $($file.Name)" }
+              Copy-Item -LiteralPath $existingFile -Destination $file.FullName
+              continue
+            }
             $uploaded = $false
             for ($attempt = 1; $attempt -le 3; $attempt++) {
-              gh release upload $env:RELEASE_TAG $file.FullName --clobber
+              gh release upload $env:RELEASE_TAG $file.FullName
               if ($LASTEXITCODE -eq 0) { $uploaded = $true; break }
               Start-Sleep -Seconds 3
             }
             if (-not $uploaded) { throw "Upload failed: $($file.Name)" }
           }
+          $checksumText = ($packages | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_.Name }) -join "`n"
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'dist/SHA256SUMS.txt'), $checksumText + "`n", [System.Text.UTF8Encoding]::new($false))
+          $checksum = Get-Item -LiteralPath dist/SHA256SUMS.txt
+          if ('SHA256SUMS.txt' -notin $existingAssets.name) {
+            gh release upload $env:RELEASE_TAG $checksum.FullName
+            if ($LASTEXITCODE) { throw 'Checksum upload failed' }
+          }
+          $files = @($packages) + @($checksum)
           $download = Join-Path $env:RUNNER_TEMP 'arizdot-release-verification'
           New-Item -ItemType Directory -Path $download | Out-Null
           gh release download $env:RELEASE_TAG --dir $download --pattern '*.zip' --pattern SHA256SUMS.txt
